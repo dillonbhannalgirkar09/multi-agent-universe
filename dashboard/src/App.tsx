@@ -9,6 +9,10 @@ import {
 } from 'lucide-react';
 import './App.css';
 
+// ─── Config ─────────────────────────────────────────────────────
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:4000';
+
 // ─── Types ──────────────────────────────────────────────────────
 interface Message {
   type: string;
@@ -517,7 +521,7 @@ const App = () => {
   }, []);
 
   function connectWs() {
-    const ws = new WebSocket('ws://localhost:4000');
+    const ws = new WebSocket(WS_URL);
     ws.onopen = () => { setWsConnected(true); };
     ws.onclose = () => {
       setWsConnected(false);
@@ -572,7 +576,7 @@ const App = () => {
     setCurrentIteration({ current: 0, max: 0 });
 
     try {
-      const res = await fetch('http://localhost:4000/api/start', {
+      const res = await fetch(`${API_URL}/api/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userInput: task }),
