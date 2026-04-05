@@ -10,7 +10,16 @@ import { SystemState, AgentAction } from './types';
 
 dotenv.config();
 
-class MultiAgentSystem {
+// Import broadcast function if running as server
+let broadcast: ((data: any) => void) | null = null;
+try {
+  const serverModule = require('./server');
+  broadcast = serverModule.broadcast;
+} catch (e) {
+  // Running standalone
+}
+
+export class MultiAgentSystem {
   private llm: LLMService;
   private orchestrator: OrchestratorAgent;
   private planner: PlannerAgent;
@@ -20,12 +29,12 @@ class MultiAgentSystem {
   private maxIterations: number;
 
   constructor() {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      throw new Error('ANTHROPIC_API_KEY environment variable is required');
+      throw new Error('OPENAI_API_KEY environment variable is required');
     }
 
-    const model = process.env.MODEL_NAME || 'claude-3-5-sonnet-20241022';
+    const model = process.env.MODEL_NAME || 'gpt-4o';
     this.maxIterations = parseInt(process.env.MAX_ITERATIONS || '10');
 
     this.llm = new LLMService(apiKey, model);
@@ -34,6 +43,12 @@ class MultiAgentSystem {
     this.researcher = new ResearcherAgent(this.llm);
     this.coder = new CoderAgent(this.llm);
     this.reviewer = new ReviewerAgent(this.llm);
+  }
+
+  private emit(type: string, data: any) {
+    if (broadcast) {
+      broadcast({ type, data, timestamp: new Date().toISOString() });
+    }
   }
 
   private initializeState(userInput: string): SystemState {
@@ -49,8 +64,7 @@ class MultiAgentSystem {
 
   async run(userInput: string): Promise<void> {
     Logger.header('MULTI-AGENT UNIVERSE - Starting');
-    Logger.info(`User Request: "${userInput}"`);
-    Logger.divider();
+    this.emit('start', { userInput });
 
     const state = this.initializeState(userInput);
 
@@ -58,38 +72,76 @@ class MultiAgentSystem {
       state.iterations++;
       Logger.divider();
       Logger.info(`Iteration ${state.iterations}/${this.maxIterations}`);
-      Logger.divider();
+      
+      this.emit('iteration', { 
+        current: state.iterations, 
+        max: this.maxIterations 
+      });
 
-      // Orchestrator decides next action
+      // Safety net: force completion if we have code and are running low on iterations
+      const iterationsLeft = this.maxIterations - state.iterations;
+      if (iterationsLeft <= 2 && state.code && state.reviews.length > 0) {
+        Logger.info('Approaching iteration limit with code ready — completing task.');
+        Logger.header('TASK COMPLETED');
+        this.emit('complete', { 
+          state,
+          iterations: state.iterations 
+        });
+        this.displayFinalOutput(state);
+        return;
+      }
+
+      // Orchestrator decides
       const decisionResponse = await this.orchestrator.decide(state);
       
       if (!decisionResponse.success || !decisionResponse.data) {
-        Logger.error('System', 'Orchestrator failed to make a decision');
+        Logger.error('System', 'Orchestrator failed');
+        this.emit('error', { message: 'Orchestrator failed to decide' });
         break;
       }
 
       const decision = decisionResponse.data;
       state.actionHistory.push(decision.nextAction);
 
-      // Execute the decided action
+      this.emit('decision', {
+        action: decision.nextAction,
+        reasoning: decision.reasoning,
+        actionHistory: state.actionHistory
+      });
+
+      // Execute action
       const actionSuccess = await this.executeAction(decision.nextAction, state);
       
       if (!actionSuccess) {
-        Logger.error('System', `Action ${decision.nextAction} failed`);
+        this.emit('error', { message: `Action ${decision.nextAction} failed` });
         break;
       }
 
-      // Check if we're done
+      // Check if done
       if (decision.nextAction === AgentAction.DONE) {
-        Logger.divider();
         Logger.header('TASK COMPLETED');
+        this.emit('complete', { 
+          state,
+          iterations: state.iterations 
+        });
         this.displayFinalOutput(state);
         break;
       }
     }
 
     if (state.iterations >= this.maxIterations) {
-      Logger.error('System', 'Max iterations reached without completion');
+      Logger.error('System', 'Max iterations reached');
+      // Still emit complete if we have code, so the UI shows something useful
+      if (state.code) {
+        this.emit('complete', { 
+          state,
+          iterations: state.iterations,
+          note: 'Completed at iteration limit'
+        });
+        this.displayFinalOutput(state);
+      } else {
+        this.emit('max_iterations', { state });
+      }
     }
   }
 
@@ -100,6 +152,7 @@ class MultiAgentSystem {
         const response = await this.planner.createPlan(state);
         if (response.success && response.data) {
           state.plan = response.data;
+          this.emit('plan', response.data);
           return true;
         }
         return false;
@@ -109,6 +162,7 @@ class MultiAgentSystem {
         const response = await this.researcher.research(state);
         if (response.success && response.data) {
           state.research = response.data;
+          this.emit('research', response.data);
           return true;
         }
         return false;
@@ -118,11 +172,10 @@ class MultiAgentSystem {
         const response = await this.coder.generateCode(state);
         if (response.success && response.data) {
           state.code = response.data;
+          this.emit('code', response.data);
           
-          // Update current step status if applicable
           if (state.plan && state.currentStep < state.plan.steps.length) {
             state.plan.steps[state.currentStep].status = 'completed';
-            state.plan.steps[state.currentStep].output = JSON.stringify(response.data);
             state.currentStep++;
           }
           
@@ -135,11 +188,10 @@ class MultiAgentSystem {
         const response = await this.reviewer.review(state);
         if (response.success && response.data) {
           state.reviews.push(response.data);
+          this.emit('review', response.data);
           
-          // If review suggests improvements and provides improved code, use it
           if (response.data.improvedCode) {
             state.code = response.data.improvedCode;
-            Logger.success('System', 'Code updated with improvements');
           }
           
           return true;
@@ -147,32 +199,18 @@ class MultiAgentSystem {
         return false;
       }
 
-      case AgentAction.DONE: {
+      case AgentAction.DONE:
         return true;
-      }
 
-      default: {
-        Logger.error('System', `Unknown action: ${action}`);
+      default:
         return false;
-      }
     }
   }
 
   private displayFinalOutput(state: SystemState): void {
+    // Keep existing implementation
     Logger.divider();
     
-    if (state.plan) {
-      Logger.agent('System', 'Final Plan:');
-      console.log(JSON.stringify(state.plan, null, 2));
-      Logger.divider();
-    }
-
-    if (state.research) {
-      Logger.agent('System', 'Research Insights:');
-      console.log(JSON.stringify(state.research, null, 2));
-      Logger.divider();
-    }
-
     if (state.code) {
       Logger.agent('System', 'Generated Code:');
       state.code.files.forEach(file => {
@@ -181,34 +219,15 @@ class MultiAgentSystem {
         console.log(file.content);
         console.log('```\n');
       });
-      Logger.divider();
     }
-
-    if (state.reviews.length > 0) {
-      const finalReview = state.reviews[state.reviews.length - 1];
-      Logger.agent('System', `Final Review Rating: ${finalReview.rating}/10`);
-      Logger.divider();
-    }
-
-    Logger.success('System', `Completed in ${state.iterations} iterations`);
-    Logger.info(`Action sequence: ${state.actionHistory.join(' → ')}`);
   }
 }
 
-// Main execution
-async function main() {
-  try {
-    const system = new MultiAgentSystem();
-    
-    // Example task - can be changed to any request
-    const userInput = process.argv[2] || 
-      "Build a REST API for an expense tracker with user authentication, expense CRUD operations, and category management";
-
-    await system.run(userInput);
-  } catch (error) {
-    Logger.error('System', `Fatal error: ${error}`);
-    process.exit(1);
-  }
+// CLI mode
+if (require.main === module) {
+  const system = new MultiAgentSystem();
+  const userInput = process.argv[2] || 
+    "Build a REST API for an expense tracker with user authentication";
+  
+  system.run(userInput).catch(console.error);
 }
-
-main();

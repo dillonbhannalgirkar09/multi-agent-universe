@@ -1,28 +1,39 @@
 {
   "name": "multi-agent-universe",
   "version": "1.0.0",
-  "description": "Dynamic multi-agent system using Claude AI",
+  "description": "Dynamic multi-agent system using OpenAI with Web UI",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "start": "node dist/server.js",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:dashboard\"",
+    "dev:server": "ts-node src/server.ts",
+    "dev:dashboard": "cd dashboard && npm run dev",
+    "install:all": "npm install && cd dashboard && npm install",
     "clean": "rm -rf dist"
   },
   "keywords": [
     "ai",
     "agents",
-    "claude",
+    "openai",
     "multi-agent"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
-    "dotenv": "^16.4.5"
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.22.1",
+    "openai": "^4.28.0",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
     "@types/node": "^20.11.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^8.2.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }

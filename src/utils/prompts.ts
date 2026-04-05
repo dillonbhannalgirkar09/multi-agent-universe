@@ -6,11 +6,18 @@ export class PromptTemplates {
       ? `Previous actions: ${state.actionHistory.join(' → ')}`
       : 'No previous actions taken.';
 
+    const lastReview = state.reviews.length > 0 
+      ? state.reviews[state.reviews.length - 1]
+      : null;
+
+    const iterationsLeft = (parseInt(process.env.MAX_ITERATIONS || '20') - state.iterations);
+
     return `You are the Orchestrator Agent - the intelligent decision-maker of a multi-agent system.
 
 CURRENT SITUATION:
 User Request: "${state.userInput}"
 Iteration: ${state.iterations}
+Iterations remaining: ${iterationsLeft}
 ${historyStr}
 
 CURRENT STATE:
@@ -19,6 +26,7 @@ CURRENT STATE:
 - Code generated: ${!!state.code}
 - Reviews completed: ${state.reviews.length}
 ${state.plan ? `- Plan progress: ${state.plan.steps.filter(s => s.status === 'completed').length}/${state.plan.steps.length} steps` : ''}
+${lastReview ? `- Last review rating: ${lastReview.rating}/10 (shouldRevise: ${lastReview.shouldRevise})` : ''}
 
 AVAILABLE ACTIONS:
 1. PLAN - Create or refine the project plan (use when no plan exists or plan needs adjustment)
@@ -34,7 +42,12 @@ DECISION RULES:
 - CODE only when you have sufficient context
 - REVIEW after code generation to ensure quality
 - Can REFINE_PLAN if requirements change or issues are found
-- Only choose DONE when all steps are complete and code quality is high (review rating ≥ 8)
+- Choose DONE when code has been generated and reviewed with a rating >= 6, OR when code exists and you have 3 or fewer iterations remaining
+- If code has been reviewed and the rating is >= 7, choose DONE immediately — do not keep iterating
+- NEVER repeat the same action more than 2 times in a row — progress forward
+- A typical flow is: PLAN → RESEARCH → CODE → REVIEW → DONE
+
+IMPORTANT: Be efficient. The goal is to produce working code, not endlessly perfect it. Once code exists and has been reviewed positively, choose DONE.
 
 Respond in JSON format:
 {
