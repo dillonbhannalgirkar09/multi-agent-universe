@@ -10,8 +10,11 @@ import {
 import './App.css';
 
 // ─── Config ─────────────────────────────────────────────────────
-const API_URL = import.meta.env.VITE_API_URL || 'https://web-production-155617.up.railway.app/';
-const WS_URL = import.meta.env.VITE_WS_URL || 'wss://web-production-155617.up.railway.app/';
+const RAW_API = import.meta.env.VITE_API_URL || 'https://web-production-155617.up.railway.app';
+const API_URL = RAW_API.replace(/\/+$/, '');
+
+const RAW_WS = import.meta.env.VITE_WS_URL || 'wss://web-production-155617.up.railway.app';
+const WS_URL = RAW_WS.replace(/\/+$/, '');
 
 // ─── Types ──────────────────────────────────────────────────────
 interface Message {

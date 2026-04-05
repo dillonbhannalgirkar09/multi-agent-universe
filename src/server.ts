@@ -61,9 +61,9 @@ app.post('/api/start', async (req, res) => {
   res.json({ status: 'started', userInput });
 });
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 4000;
 
-server.listen(PORT, () => {
-  console.log(`\n🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📊 Dashboard available at http://localhost:3000\n`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🚀 Server running on port ${PORT}`);
+  console.log(`📊 Ready for incoming connections\n`);
 });
